@@ -3,36 +3,36 @@ package gobus // import "github.com/simon-engledew/gobus"
 import (
 	"fmt"
 	"sync"
+
 	"github.com/segmentio/ksuid"
 )
 
+type BusID ksuid.KSUID
+
 type Bus struct {
-	mutex sync.RWMutex
-	listeners map[string]map[ksuid.KSUID]struct{}
-	nextID ksuid.KSUID
+	mutex     sync.RWMutex
+	listeners map[string]map[BusID]struct{}
+	nextID    BusID
 }
 
 func NewBus() *Bus {
-	return &Bus {
-		listeners: make(map[string]map[ksuid.KSUID]struct{}),
-		nextID: ksuid.New(),
+	return &Bus{
+		listeners: make(map[string]map[BusID]struct{}),
 	}
 }
 
-type Unsubscribe func ()
-
-func (bus *Bus) Subscribe(key string, fn func (idx ksuid.KSUID)) Unsubscribe {
+func (bus *Bus) Subscribe(key string, fn func(idx BusID)) (unsubscribe func()) {
 	bus.mutex.Lock()
 	defer bus.mutex.Unlock()
 
 	eventID := bus.nextID
 
-	bus.nextID = ksuid.New()
+	bus.nextID = BusID(ksuid.New())
 
 	indexes, found := bus.listeners[key]
 
 	if !found {
-		indexes = make(map[ksuid.KSUID]struct{})
+		indexes = make(map[BusID]struct{})
 		bus.listeners[key] = indexes
 	}
 
@@ -63,22 +63,7 @@ func (bus *Bus) Subscribe(key string, fn func (idx ksuid.KSUID)) Unsubscribe {
 }
 
 
-func (bus *Bus) SubscribeOnce(key string, fn func (idx ksuid.KSUID)) Unsubscribe {
-	var once sync.Once
-	var unsubscribe Unsubscribe
-
-	unsubscribe = bus.Subscribe(key, func (idx ksuid.KSUID) {
-		once.Do(func() {
-			unsubscribe()
-
-			fn(idx)
-		})
-	})
-
-	return unsubscribe
-}
-
-func (bus *Bus) Publish(key string, fn func (idx ksuid.KSUID) error) error {
+func (bus *Bus) Publish(key string, fn func(idx BusID) error) error {
 	bus.mutex.RLock()
 	defer bus.mutex.RUnlock()
 	if listeners, ok := bus.listeners[key]; ok {

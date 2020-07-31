@@ -1,77 +1,96 @@
 package gobus
 
 import (
-	"github.com/segmentio/ksuid"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
+type PubSub struct {
+	Publish func(table string, operation string, id int) error
+	Subscribe func(table string, fn func(operation string, id int) error) (unsubscribe func())
+}
 
-type DatabaseSubscribe func (table string, fn func (operation string, id int) error) Unsubscribe
-type DatabasePublish func (table string, operation string, id int) error
-
-func NewPubSub() (DatabasePublish, DatabaseSubscribe) {
+func NewPubSub() PubSub {
 	bus := NewBus()
 
-	subscriptions := make(map[ksuid.KSUID]func (operation string, id int) error, 0)
+	subscriptions := make(map[BusID]func(operation string, id int) error, 0)
 
-	subscribe := func (table string, fn func (operation string, id int) error) Unsubscribe {
-		return bus.Subscribe(table, func (idx ksuid.KSUID) {
-			subscriptions[idx] = fn
-		})
+	return PubSub {
+			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
+				return bus.Subscribe(table, func(idx BusID) {
+					subscriptions[idx] = fn
+				})
+			},
+			Publish: func(table string, operation string, id int) error {
+				return bus.Publish(table, func(idx BusID) error {
+					return subscriptions[idx](operation, id)
+				})
+			},
 	}
-
-	publish := func (table string, operation string, id int) error {
-		return bus.Publish(table, func (idx ksuid.KSUID) error {
-			return subscriptions[idx](operation, id)
-		})
-	}
-
-	return publish, subscribe
 }
 
 func TestPublishSubscribe(t *testing.T) {
-	publish, subscribe := NewPubSub()
+	ps := NewPubSub()
 
 	var called int
 
-	subscribe("users", func (operation string, id int) error {
+	ps.Subscribe("users", func(operation string, id int) error {
 		called = id
 		return nil
 	})
-	require.NoError(t, publish("users", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
 
 	require.Equal(t, 42, called)
 }
 
 func TestPublishUnsubscribe(t *testing.T) {
-	publish, subscribe := NewPubSub()
+	ps := NewPubSub()
 
 	var called bool
 
-	unsubscribe := subscribe("users", func (operation string, id int) error {
+	unsubscribe := ps.Subscribe("users", func(operation string, id int) error {
 		called = true
 		return nil
 	})
 
 	unsubscribe()
 
-	require.NoError(t, publish("users","UPDATE", 1))
+	require.NoError(t, ps.Publish("users", "UPDATE", 1))
 
 	require.False(t, called)
 }
 
-
 func TestPublishSubscribeMiss(t *testing.T) {
-	publish, subscribe := NewPubSub()
+	ps := NewPubSub()
 
 	var called bool
 
-	subscribe("users", func (operation string, id int) error {
+	ps.Subscribe("users", func(operation string, id int) error {
 		called = true
 		return nil
 	})
-	require.NoError(t, publish("sessions", "UPDATE", 42))
+	require.NoError(t, ps.Publish("sessions", "UPDATE", 42))
 
 	require.False(t, called)
 }
+
+func TestPublishSubscribeMany(t *testing.T) {
+	ps := NewPubSub()
+
+	var calledA, calledB bool
+
+	ps.Subscribe("users", func(operation string, id int) error {
+		calledA = true
+		return nil
+	})
+	ps.Subscribe("users", func(operation string, id int) error {
+		calledB = true
+		return nil
+	})
+	require.NoError(t, ps.Publish("sessions", "UPDATE", 42))
+
+	require.False(t, calledA)
+	require.False(t, calledB)
+}
+
