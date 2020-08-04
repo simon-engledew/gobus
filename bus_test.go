@@ -20,6 +20,8 @@ func NewPubSub() PubSub {
 			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
 				return bus.Subscribe(table, func(idx BusID) {
 					subscriptions[idx] = fn
+				}, func (idx BusID) {
+					delete(subscriptions, idx)
 				})
 			},
 			Publish: func(table string, operation string, id int) error {
@@ -88,9 +90,28 @@ func TestPublishSubscribeMany(t *testing.T) {
 		calledB = true
 		return nil
 	})
-	require.NoError(t, ps.Publish("sessions", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
 
-	require.False(t, calledA)
-	require.False(t, calledB)
+	require.True(t, calledA)
+	require.True(t, calledB)
 }
 
+
+func TestPublishNested(t *testing.T) {
+	ps := NewPubSub()
+
+	var calledA, calledB int
+
+	ps.Subscribe("users", func(operation string, id int) error {
+		calledA = id
+		return ps.Publish("sessions", "UPDATE", 1)
+	})
+	ps.Subscribe("sessions", func(operation string, id int) error {
+		calledB = id
+		return nil
+	})
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+
+	require.Equal(t, 42, calledA)
+	require.Equal(t, 1, calledB)
+}

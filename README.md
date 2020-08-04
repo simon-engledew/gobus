@@ -17,6 +17,8 @@ func NewPubSub() PubSub {
 			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
 				return bus.Subscribe(table, func(idx BusID) {
 					subscriptions[idx] = fn
+				}, func (idx BusID) {
+					delete(subscriptions, idx)
 				})
 			},
 			Publish: func(table string, operation string, id int) error {

@@ -21,7 +21,7 @@ func NewBus() *Bus {
 	}
 }
 
-func (bus *Bus) Subscribe(key string, fn func(idx BusID)) (unsubscribe func()) {
+func (bus *Bus) Subscribe(key string, onSubscribe func(idx BusID), onUnsubscribe func (idx BusID)) (unsubscribe func()) {
 	bus.mutex.Lock()
 	defer bus.mutex.Unlock()
 
@@ -38,7 +38,7 @@ func (bus *Bus) Subscribe(key string, fn func(idx BusID)) (unsubscribe func()) {
 
 	bus.listeners[key][eventID] = struct{}{}
 
-	fn(eventID)
+	onSubscribe(eventID)
 
 	var once sync.Once
 
@@ -58,6 +58,8 @@ func (bus *Bus) Subscribe(key string, fn func(idx BusID)) (unsubscribe func()) {
 			} else {
 				panic(fmt.Errorf("no subscriptions for %s found", key))
 			}
+
+			onUnsubscribe(eventID)
 		})
 	}
 }
