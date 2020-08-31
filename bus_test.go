@@ -1,10 +1,19 @@
 package gobus
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+
+type Notify struct {
+	Operation string
+	ID int
+}
+
+const NotifyKey = "Notify"
 
 type PubSub struct {
 	Publish func(table string, operation string, id int) error
@@ -14,25 +23,38 @@ type PubSub struct {
 func NewPubSub() PubSub {
 	bus := NewBus()
 
-	subscriptions := make(map[BusID]func(operation string, id int) error, 0)
-
 	return PubSub {
 			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
-				return bus.Subscribe(table, func(idx BusID) {
-					subscriptions[idx] = fn
-				}, func (idx BusID) {
-					delete(subscriptions, idx)
+				return bus.Subscribe(table, func (ctx context.Context) error {
+					notify := ctx.Value(NotifyKey).(Notify)
+					return fn(notify.Operation, notify.ID)
 				})
 			},
 			Publish: func(table string, operation string, id int) error {
-				return bus.Publish(table, func(idx BusID) func () error {
-					fn := subscriptions[idx]
-					return func () error {
-						return fn(operation, id)
-					}
-				})
+				return bus.Publish(table, context.WithValue(context.Background(), NotifyKey, Notify {
+					Operation: operation,
+					ID: id,
+				}))
 			},
 	}
+}
+
+const TestKey = "test"
+
+func TestRaw(t *testing.T) {
+	bus := NewBus()
+	var called int
+	bus.Subscribe("hello", func(ctx context.Context) error {
+		called = ctx.Value(TestKey).(int)
+		return nil
+	})
+	require.NoError(t, bus.Publish("hello", context.WithValue(context.Background(), TestKey, 11)))
+	require.Equal(t, 11, called)
+}
+
+func TestEmpty(t *testing.T) {
+	bus := NewBus()
+	require.NoError(t, bus.Publish("hello", context.Background()))
 }
 
 func TestPublishSubscribe(t *testing.T) {

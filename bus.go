@@ -1,6 +1,7 @@
 package gobus // import "github.com/simon-engledew/gobus"
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -8,20 +9,21 @@ import (
 )
 
 type BusID ksuid.KSUID
+type Handler func (ctx context.Context) error
 
 type Bus struct {
 	mutex     sync.RWMutex
-	listeners map[string]map[BusID]struct{}
+	listeners map[string]map[BusID]Handler
 	nextID    BusID
 }
 
 func NewBus() *Bus {
 	return &Bus{
-		listeners: make(map[string]map[BusID]struct{}),
+		listeners: make(map[string]map[BusID]Handler),
 	}
 }
 
-func (bus *Bus) Subscribe(key string, onSubscribe func(idx BusID), onUnsubscribe func (idx BusID)) (unsubscribe func()) {
+func (bus *Bus) Subscribe(key string, fn Handler) (unsubscribe func()) {
 	bus.mutex.Lock()
 	defer bus.mutex.Unlock()
 
@@ -32,13 +34,11 @@ func (bus *Bus) Subscribe(key string, onSubscribe func(idx BusID), onUnsubscribe
 	indexes, found := bus.listeners[key]
 
 	if !found {
-		indexes = make(map[BusID]struct{})
+		indexes = make(map[BusID]Handler)
 		bus.listeners[key] = indexes
 	}
 
-	bus.listeners[key][eventID] = struct{}{}
-
-	onSubscribe(eventID)
+	bus.listeners[key][eventID] = fn
 
 	var once sync.Once
 
@@ -58,30 +58,29 @@ func (bus *Bus) Subscribe(key string, onSubscribe func(idx BusID), onUnsubscribe
 			} else {
 				panic(fmt.Errorf("no subscriptions for %s found", key))
 			}
-
-			onUnsubscribe(eventID)
 		})
 	}
 }
 
 
-func (bus *Bus) handlers(key string, fn func(idx BusID) func () error) []func () error {
+func (bus *Bus) listenersFor(key string) []Handler {
 	bus.mutex.RLock()
 	defer bus.mutex.RUnlock()
-	if listeners, ok := bus.listeners[key]; ok {
-		output := make([]func () error, 0, len(listeners))
-		for idx := range listeners {
-			output = append(output, fn(idx))
-		}
-		return output
+	listeners, ok := bus.listeners[key]
+	if !ok {
+		return []Handler {}
 	}
-	return []func () error {}
+	output := make([]Handler, 0, len(listeners))
+	for _, listener := range listeners {
+		output = append(output, listener)
+	}
+	return output
 }
 
 
-func (bus *Bus) Publish(key string, fn func(idx BusID) func () error) error {
-	for _, handler := range bus.handlers(key, fn) {
-		if err := handler(); err != nil {
+func (bus *Bus) Publish(key string, ctx context.Context) error {
+	for _, listener := range bus.listenersFor(key) {
+		if err := listener(ctx); err != nil {
 			return err
 		}
 	}
