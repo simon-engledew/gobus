@@ -65,14 +65,24 @@ func (bus *Bus) Subscribe(key string, onSubscribe func(idx BusID), onUnsubscribe
 }
 
 
-func (bus *Bus) Publish(key string, fn func(idx BusID) error) error {
+func (bus *Bus) handlers(key string, fn func(idx BusID) func () error) []func () error {
 	bus.mutex.RLock()
 	defer bus.mutex.RUnlock()
 	if listeners, ok := bus.listeners[key]; ok {
+		output := make([]func () error, 0, len(listeners))
 		for idx := range listeners {
-			if err := fn(idx); err != nil {
-				return err
-			}
+			output = append(output, fn(idx))
+		}
+		return output
+	}
+	return []func () error {}
+}
+
+
+func (bus *Bus) Publish(key string, fn func(idx BusID) func () error) error {
+	for _, handler := range bus.handlers(key, fn) {
+		if err := handler(); err != nil {
+			return err
 		}
 	}
 	return nil

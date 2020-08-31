@@ -1,6 +1,14 @@
 # gobus
 
-Simple, reflect-free event bus. Soon to be dated by generics. :)
+Reflect-free event bus. Soon to be dated by generics. :)
+
+This is just an experiment to see what a type safe event bus would look like.
+
+The underlying bus is swaddled in closures by the caller to achieve an effect similar to sort.
+
+This might be practical for an application that only needs one event bus, e.g: if you were dispatching based on pg/notify events.
+
+Realistically, this is probably a bit too weird for general use. :D
 
 ```go
 type PubSub struct {
@@ -22,8 +30,12 @@ func NewPubSub() PubSub {
 				})
 			},
 			Publish: func(table string, operation string, id int) error {
-				return bus.Publish(table, func(idx BusID) error {
-					return subscriptions[idx](operation, id)
+				return bus.Publish(table, func(idx BusID) func () error {
+					fn := subscriptions[idx]
+					// avoid nested locking problems by returning a unit of work
+					return func () error {
+						return fn(operation, id)
+					}
 				})
 			},
 	}
