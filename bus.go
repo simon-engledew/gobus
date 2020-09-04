@@ -9,7 +9,7 @@ import (
 )
 
 type BusID ksuid.KSUID
-type Handler func (ctx context.Context) error
+type Handler func(ctx context.Context) error
 
 type Bus struct {
 	mutex     sync.RWMutex
@@ -62,13 +62,12 @@ func (bus *Bus) Subscribe(key string, fn Handler) (unsubscribe func()) {
 	}
 }
 
-
 func (bus *Bus) listenersFor(key string) []Handler {
 	bus.mutex.RLock()
 	defer bus.mutex.RUnlock()
 	listeners, ok := bus.listeners[key]
 	if !ok {
-		return []Handler {}
+		return nil
 	}
 	output := make([]Handler, 0, len(listeners))
 	for _, listener := range listeners {
@@ -76,7 +75,6 @@ func (bus *Bus) listenersFor(key string) []Handler {
 	}
 	return output
 }
-
 
 func (bus *Bus) Publish(key string, ctx context.Context) error {
 	for _, listener := range bus.listenersFor(key) {
