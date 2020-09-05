@@ -24,34 +24,43 @@ bus.Publish("hello", context.WithValue(context.Background(), TestKey, 11))
 Or you can build a type-safe wrapper for more compile-time guarantees: 
 
 ```go
-type Notify struct {
-	Operation string
-	ID int
-}
-
-const NotifyKey = "Notify"
-
 type PubSub struct {
-	Publish func(table string, operation string, id int) error
-	Subscribe func(table string, fn func(operation string, id int) error) (unsubscribe func())
+	Publish       func(table string, operation string, id int) error
+	Subscribe     func(table string, fn func(operation string, id int) error) (unsubscribe func())
+	SubscribeOnce func(table string, fn func(operation string, id int) error) (unsubscribe func())
 }
 
-func NewPubSub() PubSub {
+type ctxKeyNotify int
+
+const notifyKey ctxKeyNotify = 0
+
+type notify struct {
+	operation string
+	id        int
+}
+
+func NewPubSub() *PubSub {
 	bus := NewBus()
 
-	return PubSub {
-			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
-				return bus.Subscribe(table, func (ctx context.Context) error {
-					notify := ctx.Value(NotifyKey).(Notify)
-					return fn(notify.Operation, notify.ID)
-				})
-			},
-			Publish: func(table string, operation string, id int) error {
-				return bus.Publish(table, context.WithValue(context.Background(), NotifyKey, Notify {
-					Operation: operation,
-					ID: id,
-				}))
-			},
+	return &PubSub{
+		Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
+			return bus.Subscribe(table, func(ctx context.Context) error {
+				notify := ctx.Value(notifyKey).(notify)
+				return fn(notify.operation, notify.id)
+			})
+		},
+		SubscribeOnce: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
+			return bus.SubscribeOnce(table, func(ctx context.Context) error {
+				notify := ctx.Value(notifyKey).(notify)
+				return fn(notify.operation, notify.id)
+			})
+		},
+		Publish: func(table string, operation string, id int) error {
+			return bus.Publish(table, context.WithValue(context.Background(), notifyKey, notify{
+				operation: operation,
+				id:        id,
+			}))
+		},
 	}
 }
 

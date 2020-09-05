@@ -2,44 +2,55 @@ package gobus
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-
-type Notify struct {
-	Operation string
-	ID int
-}
-
-const NotifyKey = "Notify"
-
 type PubSub struct {
-	Publish func(table string, operation string, id int) error
-	Subscribe func(table string, fn func(operation string, id int) error) (unsubscribe func())
+	Publish       func(table string, operation string, id int) error
+	Subscribe     func(table string, fn func(operation string, id int) error) (unsubscribe func())
+	SubscribeOnce func(table string, fn func(operation string, id int) error) (unsubscribe func())
 }
 
-func NewPubSub() PubSub {
+type ctxKeyNotify int
+
+const notifyKey ctxKeyNotify = 0
+
+type notify struct {
+	operation string
+	id        int
+}
+
+func NewPubSub() *PubSub {
 	bus := NewBus()
 
-	return PubSub {
-			Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
-				return bus.Subscribe(table, func (ctx context.Context) error {
-					notify := ctx.Value(NotifyKey).(Notify)
-					return fn(notify.Operation, notify.ID)
-				})
-			},
-			Publish: func(table string, operation string, id int) error {
-				return bus.Publish(table, context.WithValue(context.Background(), NotifyKey, Notify {
-					Operation: operation,
-					ID: id,
-				}))
-			},
+	return &PubSub{
+		Subscribe: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
+			return bus.Subscribe(table, func(ctx context.Context) error {
+				notify := ctx.Value(notifyKey).(notify)
+				return fn(notify.operation, notify.id)
+			})
+		},
+		SubscribeOnce: func(table string, fn func(operation string, id int) error) (unsubscribe func()) {
+			return bus.SubscribeOnce(table, func(ctx context.Context) error {
+				notify := ctx.Value(notifyKey).(notify)
+				return fn(notify.operation, notify.id)
+			})
+		},
+		Publish: func(table string, operation string, id int) error {
+			return bus.Publish(table, context.WithValue(context.Background(), notifyKey, notify{
+				operation: operation,
+				id:        id,
+			}))
+		},
 	}
 }
 
-const TestKey = "test"
+type ctxKeyTest int
+
+const TestKey ctxKeyTest = 0
 
 func TestRaw(t *testing.T) {
 	bus := NewBus()
@@ -102,7 +113,7 @@ func TestPublishSubscribeMiss(t *testing.T) {
 	require.False(t, called)
 }
 
-func TestPublishSubscribeMany(t *testing.T) {
+func TestPublishSubscribeFanOut(t *testing.T) {
 	ps := NewPubSub()
 
 	var calledA, calledB bool
@@ -121,6 +132,39 @@ func TestPublishSubscribeMany(t *testing.T) {
 	require.True(t, calledB)
 }
 
+func TestPublishSubscribeMany(t *testing.T) {
+	ps := NewPubSub()
+
+	var count uint32
+
+	ps.Subscribe("users", func(operation string, id int) error {
+		atomic.AddUint32(&count, 1)
+		return nil
+	})
+
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+
+	require.Equal(t, count, uint32(3))
+}
+
+func TestPublishSubscribeOnce(t *testing.T) {
+	ps := NewPubSub()
+
+	var count uint32
+
+	ps.SubscribeOnce("users", func(operation string, id int) error {
+		atomic.AddUint32(&count, 1)
+		return nil
+	})
+
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+	require.NoError(t, ps.Publish("users", "UPDATE", 42))
+
+	require.Equal(t, count, uint32(1))
+}
 
 func TestPublishNested(t *testing.T) {
 	ps := NewPubSub()
@@ -140,7 +184,6 @@ func TestPublishNested(t *testing.T) {
 	require.Equal(t, 42, calledA)
 	require.Equal(t, 1, calledB)
 }
-
 
 func TestSubscribeNested(t *testing.T) {
 	ps := NewPubSub()
