@@ -50,16 +50,16 @@ func NewPubSub() *PubSub {
 
 type ctxKeyTest int
 
-const TestKey ctxKeyTest = 0
+const testKey ctxKeyTest = 0
 
 func TestRaw(t *testing.T) {
 	bus := NewBus()
 	var called int
 	bus.Subscribe("hello", func(ctx context.Context) error {
-		called = ctx.Value(TestKey).(int)
+		called = ctx.Value(testKey).(int)
 		return nil
 	})
-	require.NoError(t, bus.Publish("hello", context.WithValue(context.Background(), TestKey, 11)))
+	require.NoError(t, bus.Publish("hello", context.WithValue(context.Background(), testKey, 11)))
 	require.Equal(t, 11, called)
 }
 
